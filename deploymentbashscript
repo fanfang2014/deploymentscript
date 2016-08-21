@@ -1,0 +1,136 @@
+#!/bin/bash
+# author: efanfag, fan.fang@ericsson.com
+# Release history:
+# 2016-04-01: Initial version
+# 2016-05-14: Fix the issue not supporting new rpms
+# 2016-08-08: Fix the bug, to use correct cut string for searning and let user choose to restart service groups if there is only service rpms
+
+echo "###rpmdeployment script is used to deploy ENM models RPMs, ENM services RPMs"
+echo "###usage: ./rpmdeployment folderofRPMs"
+echo "###For example: ./rpmdeployment /tmp/rpms"
+echo "###Remember remove the slash at the end of folder name, should be like: ./rpmdeployment /tmp/rpms"
+echo "###but not: ./rpmdeployment /tmp/rpms/"
+REPOSERVICES=0
+REPOMODELS=0
+modelfileindex=0
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+if  [ ! -d "$1" ]; 
+then
+    echo "ERROR: The specified folder doesn't exist, please specify a correct one."
+    exit
+fi
+
+if  [ ! -d "$1/backup" ];
+then
+    mkdir $1/backup
+fi
+
+for f in $1/ERIC*; do
+    if [ -e "$f" ]; 
+    then 
+        echo "RPM files exist, moving $f to relative folders." 
+    else
+        echo "ERROR: RPM files do not exist."
+        exit
+    fi
+
+    rpmName=${f%CXP*}
+    rpmName=${rpmName##*/}
+    echo "The cut rpmname  for searching is $rpmName"
+    if [ -f "/var/www/html/ENM_models/$rpmName"* ];
+    then 
+       echo "Moving the RPM from ENM_models folder to $1/backup folder..."
+       echo "/var/www/html/ENM_models/$rpmName"*
+       REPOMODELS=1
+       mv /var/www/html/ENM_models/$rpmName* $1/backup
+       mv $1/$rpmName* /var/www/html/ENM_models/
+       echo "/var/www/html/ENM_models/$rpmName"*
+       array[ $modelfileindex ]="/var/www/html/ENM_models/$rpmName"*
+       ((modelfileindex++))
+       echo "modelfileindex: $modelfileindex"
+       continue
+    fi
+
+    if [ -f "/var/www/html/ENM_services/$rpmName"* ];
+    then
+       echo "Moving the RPM from ENM_services folder to $1/backup folder..."
+       echo "/var/www/html/ENM_services/$rpmName"*
+       REPOSERVICES=1
+       mv /var/www/html/ENM_services/$rpmName* $1/backup
+       mv $1/$rpmName* /var/www/html/ENM_services/
+       continue
+    fi
+
+    echo -e "${RED}It seems the $rpmName is new, which repo would you like to put it into? ENM_services [1] or ENM_models [2]${NC} :"
+    while true; do
+        read ot
+        case $ot in
+        1 ) echo "Moving it to the ENM_services repo"; mv $1/$rpmName* /var/www/html/ENM_services/;  REPOSERVICES=1; break;;
+        2 ) echo "Moving it to the ENM_models repo"; mv $1/$rpmName* /var/www/html/ENM_models/; REPOMODELS=1; array[ $modelfileindex ]="/var/www/html/ENM_models/$rpmName"*; ((modelfileindex++)); break;;
+        * ) echo "Please answer 1 or 2.";;
+        esac
+    done
+done
+
+if [ $REPOSERVICES = 1 ];
+then
+    echo "Run createrepo for ENM_services"
+    createrepo /var/www/html/ENM_services
+fi
+
+if [ $REPOMODELS = 1 ];
+then
+    echo "Run createrepo for ENM_models"
+    createrepo /var/www/html/ENM_models
+fi
+
+yum clean all
+
+for item in ${array[*]}
+do
+  printf "The stored file names:   %s\n" $item
+  yum install -y $item
+done
+
+if [ $REPOSERVICES = 1 ] && [ $REPOMODELS = 0 ]; then
+    echo -e "${RED}There's only service RPM(s) deployed, you have two options, one is to restart the service groups manually if you know which ones to restart, the other is to let litp do it automatically for you."
+    echo -e "${RED}Which one do you prefer? Choose [1] for manual restart, [2] for automatic restart ${NC}:"
+    while true; do
+        read ot
+        case $ot in
+        1 ) echo "You have chosen to restart service groups by yourself, good luck."; exit; break;;
+        2 ) echo "You have chosen litp to run plan for you, continue with the script"; break;;
+        * ) echo "Please answer 1 or 2.";;
+        esac
+    done
+fi
+
+echo "Running: litp create_plan..."
+litp create_plan
+echo "Running: litp run_plan..."
+litp run_plan
+echo "All the steps are done, only thing left is to run 'watch litp show_plan -a' until all the plans are executed. Do not run this script again before the execution of plan is finished. I'm running the watch command for you, you can interrupt it anytime."
+
+watch litp show_plan -a
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
